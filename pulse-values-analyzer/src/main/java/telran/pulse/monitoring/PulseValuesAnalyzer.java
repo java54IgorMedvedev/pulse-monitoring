@@ -11,13 +11,20 @@ import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.events.DynamodbEvent;
 import com.amazonaws.services.lambda.runtime.events.models.dynamodb.AttributeValue;
 
+import software.amazon.awssdk.services.apigateway.ApiGatewayClient;
+import software.amazon.awssdk.services.apigateway.model.GetRestApiRequest;
+import software.amazon.awssdk.services.apigateway.model.GetRestApiResponse;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
+
 import static telran.pulse.monitoring.Constants.DEFAULT_LOGGER_LEVEL;
 import static telran.pulse.monitoring.Constants.LOGGER_LEVEL_ENV_VARIABLE;
 import static telran.pulse.monitoring.Constants.PATIENT_ID_ATTRIBUTE;
@@ -82,7 +89,7 @@ public class PulseValuesAnalyzer {
         int lastValue = getLastPulseValue(patientId);
         logger.finer(getLogMessage(map));
 
-        Range range = getNormalRange(patientId); 
+        Range range = getNormalRange(patientId);
         if (range != null && (value < range.getMin() || value > range.getMax())) {
             logger.warning(String.format("Abnormal pulse detected for patientId: %s, value: %d", patientId, value));
         }
@@ -134,39 +141,74 @@ public class PulseValuesAnalyzer {
 
     private Range getNormalRange(String patientId) {
         try {
-            String url = System.getenv("RANGE_PROVIDER_API_URL") + "/" + patientId;
+            String apiUrl = getApiGatewayUrl();
+            if (apiUrl == null) {
+                logger.warning("API Gateway URL is null.");
+                return null;
+            }
+
+            String url = apiUrl + "/Prod/range?patientId=" + patientId;
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(new URI(url))
                     .GET()
                     .build();
+
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            return parseRange(response.body()); 
+
+            if (response.statusCode() == 200) {
+                return parseRange(response.body());
+            } else {
+                logger.warning("Failed to retrieve normal range, HTTP status: " + response.statusCode());
+                return null;
+            }
         } catch (Exception e) {
             logger.warning("Failed to retrieve normal range: " + e.getMessage());
             return null;
         }
     }
 
-    private Range parseRange(String jsonResponse) {
- 
-        return new Range(60, 100); 
-    }
-}
-
-class Range {
-    private final int min;
-    private final int max;
-
-    public Range(int min, int max) {
-        this.min = min;
-        this.max = max;
-    }
-
-    public int getMin() {
-        return min;
+    private String getApiGatewayUrl() {
+        ApiGatewayClient apiGatewayClient = ApiGatewayClient.create();
+        try {
+            GetRestApiRequest request = GetRestApiRequest.builder()
+                    .restApiId("160885262786") 
+                    .build();
+            GetRestApiResponse response = apiGatewayClient.getRestApi(request);
+            return "https://" + response.id() + ".execute-api.us-east-1.amazonaws.com";
+        } catch (Exception e) {
+            logger.severe("Failed to get API Gateway URL: " + e.getMessage());
+            return null;
+        }
     }
 
-    public int getMax() {
-        return max;
+    private Range parseRange(String responseBody) {
+        ObjectMapper objectMapper = new ObjectMapper();
+        try {
+            JsonNode jsonNode = objectMapper.readTree(responseBody);
+            int min = jsonNode.get("min").asInt();
+            int max = jsonNode.get("max").asInt();
+            return new Range(min, max);
+        } catch (Exception e) {
+            logger.warning("Failed to parse response body: " + e.getMessage());
+            return null;
+        }
+    }
+
+    class Range {
+        private final int min;
+        private final int max;
+
+        public Range(int min, int max) {
+            this.min = min;
+            this.max = max;
+        }
+
+        public int getMin() {
+            return min;
+        }
+
+        public int getMax() {
+            return max;
+        }
     }
 }
