@@ -11,12 +11,9 @@ Globals:
     MemorySize: 512
     Environment:
       Variables:
-        LOGGER_LEVEL: INFO
-    
-      
+        LOGGER_LEVEL: FINEST
 
 Resources:
-  #DynamoDB Streams specification
   PulseValuesStream:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -35,7 +32,8 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
       StreamSpecification:
-          StreamViewType: NEW_AND_OLD_IMAGES
+          StreamViewType: NEW_IMAGE
+          
   PulseAbnormalValuesStream:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -54,15 +52,50 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
       StreamSpecification:
-          StreamViewType: NEW_AND_OLD_IMAGES
-         
-
-  # Define the publisher Lambda function with permissions
+          StreamViewType: NEW_IMAGE
+          
+  PulseJumpValuesStream:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: pulse_jumps_values
+      AttributeDefinitions:
+        - AttributeName: patientId
+          AttributeType: N
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: patientId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      StreamSpecification:
+          StreamViewType: NEW_IMAGE
+          
+  PulseLastValues:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: last_pulse_values
+      AttributeDefinitions:
+        - AttributeName: patientId
+          AttributeType: N
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: patientId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+       
   PulseJumpAnalyzer:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: pulse-jump-analyzer
-      
       Policies:
         - Statement:
           - Effect: Allow
@@ -77,8 +110,8 @@ Resources:
             Stream: !GetAtt PulseValuesStream.StreamArn
             FilterCriteria: 
               Filters: 
-              - Pattern: '{"eventName": ["INSERT"]}'        
-# Define the publisher Lambda function with permissions
+                - Pattern: '{"eventName": ["INSERT"]}'
+                
   PulseValuesAnalyzer:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -89,6 +122,9 @@ Resources:
             Resource: '*'
             Action:
               - dynamodb:*   
+      Environment:
+        Variables:
+          RANGE_PROVIDER_URL: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/range"
       Events:
         TableRecordChange:
           Type: DynamoDB
@@ -97,6 +133,4 @@ Resources:
             Stream: !GetAtt PulseValuesStream.StreamArn
             FilterCriteria: 
               Filters: 
-              - Pattern: '{"eventName": ["INSERT"]}'      
-  
- 
+                - Pattern: '{"eventName": ["INSERT"]}'

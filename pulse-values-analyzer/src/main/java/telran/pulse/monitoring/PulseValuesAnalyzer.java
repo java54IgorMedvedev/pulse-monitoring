@@ -1,5 +1,9 @@
 package telran.pulse.monitoring;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.Map;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.Handler;
@@ -20,11 +24,12 @@ import static telran.pulse.monitoring.Constants.PATIENT_ID_ATTRIBUTE;
 import static telran.pulse.monitoring.Constants.TIMESTAMP_ATTRIBUTE;
 import static telran.pulse.monitoring.Constants.VALUE_ATTRIBUTE;
 
-public class App {
+public class PulseValuesAnalyzer {
 
-    static DynamoDbClient client = DynamoDbClient.builder().build();
-    static Logger logger = Logger.getLogger("pulse-value-analyzer");
-    static float factor;
+    private static final HttpClient httpClient = HttpClient.newHttpClient();
+    private static final DynamoDbClient client = DynamoDbClient.builder().build();
+    private static final Logger logger = Logger.getLogger("pulse-value-analyzer");
+    private static float factor;
 
     static {
         loggerSetUp();
@@ -34,10 +39,10 @@ public class App {
     public void handleRequest(DynamodbEvent event, Context context) {
         event.getRecords().forEach(r -> {
             Map<String, AttributeValue> map = r.getDynamodb().getNewImage();
-            if (map == null) {
-                logger.warning("No new image found");
-            } else if ("INSERT".equals(r.getEventName())) {
+            if (map != null && "INSERT".equals(r.getEventName())) {
                 processPulseValue(map);
+            } else if (map == null) {
+                logger.warning("No new image found");
             } else {
                 logger.warning(String.format("The event isn't INSERT but %s", r.getEventName()));
             }
@@ -76,6 +81,12 @@ public class App {
         String patientId = map.get(PATIENT_ID_ATTRIBUTE).getN();
         int lastValue = getLastPulseValue(patientId);
         logger.finer(getLogMessage(map));
+
+        Range range = getNormalRange(patientId); 
+        if (range != null && (value < range.getMin() || value > range.getMax())) {
+            logger.warning(String.format("Abnormal pulse detected for patientId: %s, value: %d", patientId, value));
+        }
+
         if (isJump(value, lastValue)) {
             recordJump(patientId, lastValue, value, map.get(TIMESTAMP_ATTRIBUTE).getN());
         }
@@ -92,32 +103,70 @@ public class App {
 
     private int getLastPulseValue(String patientId) {
         GetItemRequest request = GetItemRequest.builder()
-            .tableName("pulse_last_value")
-            .key(Map.of(PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build()))
-            .build();
+                .tableName("pulse_last_value")
+                .key(Map.of(PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build()))
+                .build();
         Map<String, software.amazon.awssdk.services.dynamodb.model.AttributeValue> item = client.getItem(request).item();
         return item != null && item.containsKey(VALUE_ATTRIBUTE) ? Integer.parseInt(item.get(VALUE_ATTRIBUTE).n()) : 0;
     }
 
     private void saveLastPulseValue(String patientId, int value) {
         client.putItem(PutItemRequest.builder()
-            .tableName("pulse_last_value")
-            .item(Map.of(
-                PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build(),
-                VALUE_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(value)).build()
-            ))
-            .build());
+                .tableName("pulse_last_value")
+                .item(Map.of(
+                        PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build(),
+                        VALUE_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(value)).build()
+                ))
+                .build());
     }
 
     private void recordJump(String patientId, int lastValue, int currentValue, String timestamp) {
         client.putItem(PutItemRequest.builder()
-            .tableName("pulse_jump_values")
-            .item(Map.of(
-                PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build(),
-                "PreviousValue", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(lastValue)).build(),
-                "CurrentValue", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(currentValue)).build(),
-                TIMESTAMP_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(timestamp).build()
-            ))
-            .build());
+                .tableName("pulse_jump_values")
+                .item(Map.of(
+                        PATIENT_ID_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(patientId).build(),
+                        "PreviousValue", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(lastValue)).build(),
+                        "CurrentValue", software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(String.valueOf(currentValue)).build(),
+                        TIMESTAMP_ATTRIBUTE, software.amazon.awssdk.services.dynamodb.model.AttributeValue.builder().n(timestamp).build()
+                ))
+                .build());
+    }
+
+    private Range getNormalRange(String patientId) {
+        try {
+            String url = System.getenv("RANGE_PROVIDER_API_URL") + "/" + patientId;
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(new URI(url))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return parseRange(response.body()); 
+        } catch (Exception e) {
+            logger.warning("Failed to retrieve normal range: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private Range parseRange(String jsonResponse) {
+ 
+        return new Range(60, 100); 
+    }
+}
+
+class Range {
+    private final int min;
+    private final int max;
+
+    public Range(int min, int max) {
+        this.min = min;
+        this.max = max;
+    }
+
+    public int getMin() {
+        return min;
+    }
+
+    public int getMax() {
+        return max;
     }
 }
