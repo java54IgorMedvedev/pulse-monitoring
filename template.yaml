@@ -12,8 +12,11 @@ Globals:
     Environment:
       Variables:
         LOGGER_LEVEL: FINEST
+    
+      
 
 Resources:
+  #DynamoDB Streams specification
   PulseValuesStream:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -33,7 +36,6 @@ Resources:
         WriteCapacityUnits: 5
       StreamSpecification:
           StreamViewType: NEW_IMAGE
-          
   PulseAbnormalValuesStream:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -53,7 +55,7 @@ Resources:
         WriteCapacityUnits: 5
       StreamSpecification:
           StreamViewType: NEW_IMAGE
-          
+         
   PulseJumpValuesStream:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -73,7 +75,6 @@ Resources:
         WriteCapacityUnits: 5
       StreamSpecification:
           StreamViewType: NEW_IMAGE
-          
   PulseLastValues:
     Type: 'AWS::DynamoDB::Table'
     Properties:
@@ -81,21 +82,20 @@ Resources:
       AttributeDefinitions:
         - AttributeName: patientId
           AttributeType: N
-        - AttributeName: timestamp
-          AttributeType: N
+        
       KeySchema:
         - AttributeName: patientId
           KeyType: HASH
-        - AttributeName: timestamp
-          KeyType: RANGE
+       
       ProvisionedThroughput:
         ReadCapacityUnits: 5
-        WriteCapacityUnits: 5
-       
+        WriteCapacityUnits: 5       
+  # Define the publisher Lambda function with permissions
   PulseJumpAnalyzer:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: pulse-jump-analyzer
+      
       Policies:
         - Statement:
           - Effect: Allow
@@ -110,8 +110,8 @@ Resources:
             Stream: !GetAtt PulseValuesStream.StreamArn
             FilterCriteria: 
               Filters: 
-                - Pattern: '{"eventName": ["INSERT"]}'
-                
+              - Pattern: '{"eventName": ["INSERT"]}'        
+# Define the publisher Lambda function with permissions
   PulseValuesAnalyzer:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -121,10 +121,10 @@ Resources:
           - Effect: Allow
             Resource: '*'
             Action:
-              - dynamodb:*   
+              - dynamodb:*  
       Environment:
         Variables:
-          RANGE_PROVIDER_URL: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/range"
+          BASE_URL:  !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/range"       
       Events:
         TableRecordChange:
           Type: DynamoDB
@@ -133,4 +133,4 @@ Resources:
             Stream: !GetAtt PulseValuesStream.StreamArn
             FilterCriteria: 
               Filters: 
-                - Pattern: '{"eventName": ["INSERT"]}'
+              - Pattern: '{"eventName": ["INSERT"]}'      
