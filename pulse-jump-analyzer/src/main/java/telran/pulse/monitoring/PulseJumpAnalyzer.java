@@ -10,9 +10,9 @@ import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
 import software.amazon.awssdk.services.dynamodb.*;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest.Builder;
-import static telran.pulse.monitoring.Constants.*;
+import static telran.pulse.monitoring.ConstantsPulseJumpAnalyzer.*;
 
-public class App {
+public class PulseJumpAnalyzer {
 	static DynamoDbClient clientDynamo = DynamoDbClient.builder().build();
 	static Builder requestInsertLastValues;
 	static Builder requestInsertJumpValues;
@@ -50,7 +50,7 @@ public class App {
 						}
 						
 					}
-					putLastValue(patientId, lastValue);
+					putLastValue(patientId, currentValue);
 				} else {
 					logger.warning(r.getEventName() + " event name but should be INSERT");
 				}

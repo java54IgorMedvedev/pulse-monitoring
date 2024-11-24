@@ -90,7 +90,16 @@ Resources:
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5       
-  # Define the publisher Lambda function with permissions
+  #SNS Topic for Abnormal pulse values notifications
+  AbnormalValuesSNS:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: AbnormalValuesTopic
+      Subscription:
+        - Protocol: email
+          Endpoint: psydov81@gmail.com
+        
+  # lambda function for pulse jumps finding out
   PulseJumpAnalyzer:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -134,3 +143,38 @@ Resources:
             FilterCriteria: 
               Filters: 
               - Pattern: '{"eventName": ["INSERT"]}'      
+  RangeProviderFunction:
+    Type: AWS::Serverless::Function 
+    Properties:
+      CodeUri: range-provider
+      Events:
+        GetRange:
+          Type: Api 
+          Properties:
+            Path: /range
+            Method: get
+  # Lambda for abnormal pulse valuse notification 
+  AbnormalValuesNotifier:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: abnormal-values-notifier
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AbnormalValuesSNS.TopicName
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref AbnormalValuesSNS
+          REGION: !Sub ${AWS::Region} 
+      Events:
+        TableRecordChange:
+          Type: DynamoDB
+          Properties:
+            StartingPosition: LATEST
+            Stream: !GetAtt PulseAbnormalValuesStream.StreamArn
+            FilterCriteria: 
+              Filters: 
+              - Pattern: '{"eventName": ["INSERT"]}'         
+Outputs:
+  RangeProviderApi:
+    Description: "API Gateway endpoint URL for Prod stage for Range Provider function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/range"

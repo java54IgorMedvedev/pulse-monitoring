@@ -1,7 +1,7 @@
 package telran.pulse.monitoring;
 
 
-public interface Constants {
+public interface ConstantsPulseJumpAnalyzer {
     String PATIENT_ID_ATTRIBUTE = "patientId";
     String TIMESTAMP_ATTRIBUTE = "timestamp";
     String VALUE_ATTRIBUTE = "value";
